@@ -4,8 +4,9 @@
 
 ## 打开方式
 
-- GitHub Pages（需在仓库 Settings → Pages 里开启）：https://t29crff55n-star.github.io/btc-alert/
-- 不开 Pages 也能用：https://raw.githack.com/t29crff55n-star/btc-alert/app/index.html
+https://t29crff55n-star.github.io/btc-alert/
+
+（需先在仓库 Settings → Pages 里选择从 `app` 分支发布。）
 
 打开后先点右上角「开启提醒」，iPad 才允许响铃和语音。
 
