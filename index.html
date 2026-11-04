@@ -1,0 +1,788 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="BTC信号">
+<title>BTC 回归信号台</title>
+<style>
+/* 布局：盯盘仪表 —— 顶部状态条；左列大号读数、持仓卡、值不值得做；右列 24 小时走势、设置、记录；窄屏单列 */
+:root {
+  --bg: #f3f5f6; --panel: #ffffff; --line: #dde3e6; --fg: #132026; --muted: #5b6a71;
+  --up: #d2452a; --down: #0b7fa6; --warn: #a86a00; --ok: #2f7d4a;
+  --up-soft: rgba(210, 69, 42, .10); --down-soft: rgba(11, 127, 166, .10); --warn-soft: rgba(168, 106, 0, .12);
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --sans: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0e1113; --panel: #14181b; --line: #263037; --fg: #e6ecef; --muted: #8d9aa1;
+    --up: #ea5a37; --down: #1f9fc2; --warn: #f0b541; --ok: #5cc485;
+    --up-soft: rgba(234, 90, 55, .14); --down-soft: rgba(31, 159, 194, .14); --warn-soft: rgba(240, 181, 65, .14);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0e1113; --panel: #14181b; --line: #263037; --fg: #e6ecef; --muted: #8d9aa1;
+  --up: #ea5a37; --down: #1f9fc2; --warn: #f0b541; --ok: #5cc485;
+  --up-soft: rgba(234, 90, 55, .14); --down-soft: rgba(31, 159, 194, .14); --warn-soft: rgba(240, 181, 65, .14);
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html { padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); background: var(--bg); }
+body {
+  margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.55 var(--sans);
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 12px 32px;
+}
+h2 { font-size: 13px; letter-spacing: .06em; color: var(--muted); font-weight: 600; margin: 0 0 10px; text-wrap: balance; }
+button, input, select { font: inherit; color: inherit; }
+button { cursor: pointer; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); padding: 8px 14px; }
+button:focus-visible, input:focus-visible { outline: 2px solid var(--down); outline-offset: 2px; }
+button.primary { background: var(--fg); color: var(--bg); border-color: var(--fg); font-weight: 600; }
+button.primary.on { background: transparent; color: var(--ok); border-color: var(--ok); }
+.num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.label { display: block; font-size: 12px; color: var(--muted); letter-spacing: .04em; }
+
+.top { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; max-width: 1180px; margin: 0 auto 14px; }
+.brand { font-weight: 700; font-size: 17px; margin-right: auto; }
+.brand small { font-weight: 400; color: var(--muted); font-size: 13px; margin-left: 6px; }
+.conn { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+.conn.ok .dot { background: var(--ok); }
+.conn.bad .dot { background: var(--up); }
+.conn.bad { color: var(--up); }
+
+.grid { display: grid; gap: 14px; max-width: 1180px; margin: 0 auto; grid-template-columns: 1fr; }
+@media (min-width: 900px) {
+  .grid { grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); align-items: start; }
+  .col { display: grid; gap: 14px; }
+}
+.col { display: grid; gap: 14px; min-width: 0; }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; min-width: 0; }
+
+.readout .head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.pill { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+.pill.up { color: var(--up); border-color: var(--up); background: var(--up-soft); }
+.pill.down { color: var(--down); border-color: var(--down); background: var(--down-soft); }
+.pill.warn { color: var(--warn); border-color: var(--warn); background: var(--warn-soft); }
+.sval { display: flex; align-items: baseline; gap: 12px; margin: 14px 0 6px; flex-wrap: wrap; }
+.big { font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: clamp(48px, 9vw, 76px); font-weight: 600; line-height: 1; letter-spacing: -.02em; }
+.big.up { color: var(--up); } .big.down { color: var(--down); }
+.meter { position: relative; height: 10px; border-radius: 5px; background: var(--line); margin: 12px 0 4px; overflow: hidden; }
+.meter .zone { position: absolute; top: 0; bottom: 0; }
+.meter .zone.l { left: 0; width: 20%; background: var(--down-soft); }
+.meter .zone.r { right: 0; width: 20%; background: var(--up-soft); }
+.meter .tick { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--muted); opacity: .5; }
+.meter .needle { position: absolute; top: -2px; bottom: -2px; width: 4px; border-radius: 2px; background: var(--fg); transform: translateX(-2px); transition: left .4s ease; }
+.meter-scale { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); font-family: var(--mono); }
+.stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 16px; }
+.stats .v { font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: 20px; font-weight: 600; }
+.hint { font-size: 13px; color: var(--muted); margin: 14px 0 0; }
+
+.trade { border-width: 2px; }
+.trade.up { border-color: var(--up); } .trade.down { border-color: var(--down); }
+.trade-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.side { font-size: 22px; font-weight: 700; }
+.trade.up .side { color: var(--up); } .trade.down .side { color: var(--down); }
+.tstate { font-size: 14px; color: var(--muted); }
+.levels { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 14px; margin: 14px 0; }
+.levels div { min-width: 0; }
+.levels dt { font-size: 12px; color: var(--muted); }
+.levels dd { margin: 0; font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: 20px; font-weight: 600; }
+.levels dd small { font-size: 12px; color: var(--muted); font-weight: 400; display: block; }
+.fill { display: grid; gap: 4px; font-size: 13px; color: var(--muted); }
+.fill input, .form input[type="number"], .form input[type="text"] { width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
+.size { font-size: 14px; margin: 12px 0; }
+.pnl { display: flex; align-items: baseline; gap: 10px; margin-bottom: 12px; }
+.pnl .v { font-family: var(--mono); font-size: 20px; font-weight: 600; }
+.pos { color: var(--ok); } .neg { color: var(--up); }
+
+.chartbox { position: relative; }
+#chart { display: block; width: 100%; height: 200px; touch-action: pan-y; }
+#chart text { font-family: var(--mono); font-size: 11px; fill: var(--muted); }
+.tip { position: absolute; pointer-events: none; background: var(--fg); color: var(--bg); font: 12px/1.4 var(--mono); padding: 4px 8px; border-radius: 6px; white-space: nowrap; transform: translate(-50%, -110%); }
+.caption { font-size: 12px; color: var(--muted); margin: 8px 0 0; }
+
+.edge .netline { font-size: 15px; margin-bottom: 10px; }
+.edge .netline b { font-family: var(--mono); font-size: 18px; }
+.tbl { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 13px; }
+th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th { color: var(--muted); font-weight: 500; }
+td.n { font-family: var(--mono); font-variant-numeric: tabular-nums; text-align: right; }
+th.n { text-align: right; }
+.note { font-size: 13px; color: var(--muted); margin: 10px 0 0; }
+
+.form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.form label { display: grid; gap: 4px; font-size: 13px; color: var(--muted); min-width: 0; }
+.form .wide { grid-column: 1 / -1; }
+.form .check { display: flex; align-items: center; gap: 8px; color: var(--fg); }
+.modes { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin: 0; display: grid; gap: 8px; min-width: 0; }
+.modes legend { font-size: 13px; color: var(--muted); padding: 0 4px; }
+.preview { font-size: 13px; color: var(--muted); margin: 12px 0 0; }
+.actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
+
+.help ul { margin: 0; padding-left: 18px; font-size: 14px; display: grid; gap: 6px; }
+.empty { color: var(--muted); font-size: 13px; }
+
+.alert { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; padding: 24px max(16px, env(safe-area-inset-right, 0px)) 24px max(16px, env(safe-area-inset-left, 0px)); background: rgba(0, 0, 0, .55); }
+.alert .box { width: min(560px, 100%); background: var(--panel); border-radius: 16px; padding: 24px; border: 3px solid var(--line); display: grid; gap: 12px; }
+.alert.up .box { border-color: var(--up); } .alert.down .box { border-color: var(--down); } .alert.warn .box { border-color: var(--warn); }
+.alert .t { font-size: 30px; font-weight: 800; }
+.alert.up .t { color: var(--up); } .alert.down .t { color: var(--down); } .alert.warn .t { color: var(--warn); }
+.alert .b { font-size: 17px; white-space: pre-line; }
+.alert button { justify-self: start; }
+@media (prefers-reduced-motion: reduce) { .meter .needle { transition: none; } }
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="brand">BTC 回归信号台<small>BTCUSDT · 15 分钟</small></div>
+  <div class="conn" id="conn"><span class="dot"></span><span id="connText">正在连接 Binance…</span></div>
+  <button id="armBtn" class="primary" type="button">开启提醒</button>
+</header>
+
+<main class="grid">
+  <div class="col">
+    <section class="panel readout">
+      <div class="head">
+        <span class="pill" id="statePill" aria-live="polite">等待信号</span>
+        <span class="label" id="updated">—</span>
+      </div>
+      <div class="sval">
+        <span class="big" id="sNow">—</span>
+        <span class="label">当前信号 S<br>≥ +3 做多 · ≤ −3 做空</span>
+      </div>
+      <div class="meter" aria-hidden="true">
+        <span class="zone l"></span><span class="zone r"></span>
+        <span class="tick" style="left:20%"></span><span class="tick" style="left:50%"></span><span class="tick" style="left:80%"></span>
+        <span class="needle" id="needle" style="left:50%"></span>
+      </div>
+      <div class="meter-scale"><span>−5</span><span>−3</span><span>0</span><span>+3</span><span>+5</span></div>
+      <div class="stats">
+        <div><span class="label">现价</span><span class="v" id="price">—</span></div>
+        <div><span class="label">距 K 线收盘</span><span class="v" id="countdown">--:--</span></div>
+        <div><span class="label">ATR（15 分钟）</span><span class="v" id="atrNow">—</span></div>
+      </div>
+      <p class="hint" id="readHint">每根 15 分钟 K 线收盘时判断一次。信号出现后 1 分钟内进场。</p>
+    </section>
+
+    <section class="panel trade" id="tradeCard" hidden>
+      <div class="trade-head"><span class="side" id="tSide">做多</span><span class="pill" id="tPill">请在 1 分钟内进场</span></div>
+      <dl class="levels">
+        <div><dt>参考进场价</dt><dd id="tEntry">—</dd></div>
+        <div><dt id="tStopL">止损</dt><dd id="tStop">—</dd></div>
+        <div id="tTpRow"><dt id="tTpL">止盈</dt><dd id="tTp">—</dd></div>
+        <div><dt>最晚平仓</dt><dd id="tExit">—</dd></div>
+      </dl>
+      <label class="fill" for="fillPx">我的实际成交价（填了之后止损止盈按它重算）
+        <input id="fillPx" type="text" inputmode="decimal" placeholder="例如 77390.5" autocomplete="off">
+      </label>
+      <div class="size" id="tSize"></div>
+      <div class="pnl"><span class="label">按现价算的浮动盈亏</span><span class="v" id="tPnl">—</span></div>
+      <button id="closeBtn" type="button">我已手动平仓，结束这笔</button>
+    </section>
+
+    <section class="panel edge">
+      <h2>这套规则值不值得做</h2>
+      <div class="netline">当前模式「<span id="modeName">—</span>」，按你填的手续费，预期每笔净收益 <b id="netBp">—</b></div>
+      <div class="netline" id="beLine"></div>
+      <div class="tbl">
+        <table>
+          <thead><tr><th>回测区间</th><th class="n">胜率</th><th class="n">毛收益/笔</th><th class="n">扣你的手续费</th></tr></thead>
+          <tbody id="edgeRows"></tbody>
+        </table>
+      </div>
+      <p class="note">数据：Binance BTCUSDT 15 分钟 K 线 2023-11 至 2026-11。前两年选参数，最后一年没调过。1bp = 0.01%。晚 5 分钟进场，最近一年毛收益从 5.75bp 降到约 3.5bp；晚 15 分钟变成负数。吃单（单边约 5bp）时每笔净亏约 4–5bp，只有进出都挂单且单边 ≤ 2bp 才勉强为正。仅供研究，不是投资建议。</p>
+    </section>
+  </div>
+
+  <div class="col">
+    <section class="panel">
+      <h2>最近 24 小时的信号 S</h2>
+      <div class="chartbox" id="chartBox">
+        <svg id="chart" role="img" aria-label="最近 24 小时信号 S 走势"></svg>
+        <div class="tip" id="tip" hidden></div>
+      </div>
+      <p class="caption">每个点是一根 15 分钟 K 线收盘时的 S。上方色带为做多区（≥ +3），下方为做空区（≤ −3），圆点是当时出现的信号。</p>
+    </section>
+
+    <section class="panel">
+      <h2>仓位与提醒设置</h2>
+      <form class="form" id="form" autocomplete="off">
+        <fieldset class="wide modes">
+          <legend>出场方式</legend>
+          <label class="check" for="modeRr"><input id="modeRr" type="radio" name="mode" value="rr"> 1:2 盈亏比：止损 1×ATR，止盈 2×ATR，最多持有 2 小时</label>
+          <label class="check" for="modeTime"><input id="modeTime" type="radio" name="mode" value="time"> 到点平仓：止损 2×ATR，持有 1 小时（回测毛收益最高）</label>
+        </fieldset>
+        <label for="equity">本金（USDT）<input id="equity" type="number" min="0" step="any"></label>
+        <label for="risk">单笔止损最多亏本金的 %<input id="risk" type="number" min="0.05" max="5" step="0.05"></label>
+        <label for="lev">最大杠杆（倍）<input id="lev" type="number" min="1" max="20" step="0.5"></label>
+        <label for="fee">手续费（单边，bp）<input id="fee" type="number" min="0" max="20" step="0.1"></label>
+        <label class="check wide" for="tp" id="tpWrap"><input id="tp" type="checkbox"> 到点平仓模式下加固定止盈 3×ATR（回测里每笔少约 1bp）</label>
+        <label class="check wide" for="voice"><input id="voice" type="checkbox"> 语音播报（中文）</label>
+        <label class="wide" for="bark">可选：Bark 推送码（在另一台常开设备上运行本页时，用它把提醒推到 iPhone/iPad 锁屏）
+          <input id="bark" type="text" placeholder="Bark App 里显示的 key，留空则不推送"></label>
+      </form>
+      <p class="preview" id="sizePreview"></p>
+      <div class="actions">
+        <button id="testBtn" type="button">测试提醒（不会开单）</button>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>信号记录（只存在这台设备上）</h2>
+      <div class="tbl">
+        <table>
+          <thead><tr><th>信号时间</th><th>方向</th><th class="n">进场</th><th class="n">出场</th><th>结果</th><th class="n">净 bp</th></tr></thead>
+          <tbody id="logRows"></tbody>
+        </table>
+      </div>
+      <p class="empty" id="logEmpty">还没有记录。出现信号后会自动记下进场、出场和结果。</p>
+    </section>
+
+    <section class="panel help">
+      <h2>使用须知</h2>
+      <ul>
+        <li>页面要一直开着并留在前台。iPad 请到「设置 → 显示与亮度 → 自动锁定」选「永不」，并接上电源。</li>
+        <li>先点右上角「开启提醒」，iPad 才允许响铃和语音。可以用「测试提醒」试一下声音。</li>
+        <li>行情直接从 Binance 公开接口获取（现货 BTCUSDT）。在中国大陆可能需要打开 VPN 才能连上。</li>
+        <li>成交后马上在交易所挂好止损单和止盈单，不要只靠本页提醒再手动平仓：断网、iPad 锁屏或 Safari 切到后台时，提醒都会失效。</li>
+        <li>信号按现货价计算，合约价格略有差异。成交后请把实际成交价填进持仓卡，止损止盈会按它重算。</li>
+        <li>信号出现超过 90 秒才被发现（比如页面刚从后台切回来）时，只记录为“错过”，不提醒开单。</li>
+        <li>回测结论：按普通吃单手续费，两种出场方式长期都是亏钱的；1:2 模式的胜率约 35%，止损只有约 0.5%，手续费占比更高。仅供研究和模拟盘验证，不是投资建议。</li>
+      </ul>
+    </section>
+  </div>
+</main>
+
+<div class="alert" id="alert" hidden role="alertdialog" aria-labelledby="alertT">
+  <div class="box">
+    <div class="t" id="alertT">做多</div>
+    <div class="b" id="alertB"></div>
+    <button id="alertOk" class="primary" type="button">知道了</button>
+  </div>
+</div>
+
+<script>
+// BTC 15m 均值回归信号引擎：与 btc_mine.py / btc_rev.py 的 pandas 计算逐项对应。
+(function (root) {
+  const ZWIN = 2880, ZMIN = 672;
+
+  function rollSum(x, w) {
+    const out = new Array(x.length).fill(NaN);
+    let s = 0;
+    for (let i = 0; i < x.length; i++) {
+      s += x[i];
+      if (i >= w) s -= x[i - w];
+      if (i >= w - 1) out[i] = s;
+    }
+    return out;
+  }
+
+  function rollExtreme(x, w, isMax) {
+    const out = new Array(x.length).fill(NaN);
+    for (let i = w - 1; i < x.length; i++) {
+      let m = x[i];
+      for (let j = i - w + 1; j < i; j++) m = isMax ? Math.max(m, x[j]) : Math.min(m, x[j]);
+      out[i] = m;
+    }
+    return out;
+  }
+
+  // pandas rolling(w, min_periods).mean()/.std()（ddof=1），NaN 不计数
+  function rollMeanStd(x, w, minp) {
+    const n = x.length, mean = new Array(n).fill(NaN), std = new Array(n).fill(NaN);
+    let cnt = 0, s = 0, ss = 0;
+    for (let i = 0; i < n; i++) {
+      const a = x[i];
+      if (!Number.isNaN(a)) { cnt++; s += a; ss += a * a; }
+      if (i >= w) {
+        const b = x[i - w];
+        if (!Number.isNaN(b)) { cnt--; s -= b; ss -= b * b; }
+      }
+      if (cnt >= minp) {
+        const m = s / cnt;
+        mean[i] = m;
+        if (cnt > 1) std[i] = Math.sqrt(Math.max(0, (ss - cnt * m * m) / (cnt - 1)));
+      }
+    }
+    return { mean, std };
+  }
+
+  function ewm(x, alpha, minp) {
+    const out = new Array(x.length).fill(NaN);
+    let y = NaN;
+    for (let i = 0; i < x.length; i++) {
+      y = Number.isNaN(y) ? x[i] : (1 - alpha) * y + alpha * x[i];
+      if (i >= minp - 1) out[i] = y;
+    }
+    return out;
+  }
+
+  const fin = (v) => (Number.isFinite(v) ? v : NaN);
+
+  function zscore(x) {
+    const { mean, std } = rollMeanStd(x, ZWIN, ZMIN);
+    return x.map((v, i) => fin((v - mean[i]) / std[i]));
+  }
+
+  // bars: [{t, o, h, l, c, v, tb}]，全部为已收盘 K 线，按时间升序
+  function compute(bars) {
+    const n = bars.length;
+    const o = bars.map(b => b.o), h = bars.map(b => b.h), l = bars.map(b => b.l);
+    const c = bars.map(b => b.c), v = bars.map(b => b.v), tb = bars.map(b => b.tb);
+    const tr = c.map((_, i) => i === 0 ? h[0] - l[0]
+      : Math.max(h[i] - l[i], Math.abs(h[i] - c[i - 1]), Math.abs(l[i] - c[i - 1])));
+    const atr = ewm(tr, 1 / 14, 14);
+    const emaC = ewm(c, 2 / 97, 1);
+    const cv = rollSum(c.map((x, i) => x * v[i]), 96), v96 = rollSum(v, 96);
+    const tb4 = rollSum(tb, 4), v4 = rollSum(v, 4);
+    const lo96 = rollExtreme(l, 96, false), hi96 = rollExtreme(h, 96, true);
+    const lag = (k, i) => (i >= k ? Math.log(c[i] / c[i - k]) : NaN);
+
+    const f = {
+      r1: c.map((_, i) => lag(1, i)),
+      mom4: c.map((_, i) => lag(4, i)),
+      mom16: c.map((_, i) => lag(16, i)),
+      close_loc: c.map((x, i) => (h[i] - l[i] === 0 ? NaN : (x - l[i]) / (h[i] - l[i]))),
+      taker_imb4: c.map((_, i) => fin(2 * tb4[i] / v4[i] - 1)),
+      donchian: c.map((x, i) => fin((x - lo96[i]) / (hi96[i] - lo96[i]))),
+      vwap_dev: c.map((x, i) => fin((x - cv[i] / v96[i]) / atr[i])),
+      ema_dev: c.map((x, i) => fin((x - emaC[i]) / atr[i])),
+    };
+    const zs = Object.values(f).map(zscore);
+    const raw = new Array(n).fill(NaN);
+    for (let i = 0; i < n; i++) {
+      let s = 0, k = 0;
+      for (const z of zs) if (!Number.isNaN(z[i])) { s += Math.max(-4, Math.min(4, z[i])); k++; }
+      if (k) raw[i] = -s / k;
+    }
+    const S = zscore(raw);
+    return { S, atr };
+  }
+
+  root.BTCEngine = { compute, ZWIN, ZMIN };
+  if (typeof module !== "undefined") module.exports = root.BTCEngine;
+})(typeof window !== "undefined" ? window : globalThis);
+</script>
+<script>
+(function () {
+  const E = window.BTCEngine;
+  const HOSTS = ["https://data-api.binance.vision", "https://api.binance.com", "https://api1.binance.com", "https://api3.binance.com"];
+  const BAR = 15 * 60 * 1000, THR = 3, NBARS = 7000, ACT = 90 * 1000, HOUR = 3600e3;
+  // 回测数据：[前 2 年, 最近 1 年]
+  const MODES = {
+    rr: { name: "1:2 盈亏比", stop: 1, tp: 2, hold: 2 * HOUR, gross: [4.35, 1.77], win: [0.35, 0.36] },
+    time: { name: "到点平仓", stop: 2, tp: 3, hold: HOUR, gross: [5.08, 5.75], grossTp: [4.36, 4.67], win: [0.52, 0.49] },
+  };
+  const mode = () => MODES[settings.mode] || MODES.rr;
+  const tpOn = () => settings.mode !== "time" || !!settings.tp;
+  const $ = (id) => document.getElementById(id);
+
+  const store = {
+    get(k, d) { try { const v = JSON.parse(localStorage.getItem("btcrev." + k)); return v == null ? d : v; } catch (e) { return d; } },
+    set(k, v) { try { localStorage.setItem("btcrev." + k, JSON.stringify(v)); } catch (e) { /* 存储不可用时只影响记忆 */ } },
+  };
+  let settings = Object.assign({ mode: "rr", equity: 1000, risk: 0.5, lev: 3, fee: 5, tp: false, voice: true, bark: "" }, store.get("settings", {}));
+  let state = Object.assign({ trade: null, lastEval: 0 }, store.get("state", {}));
+  let log = store.get("log", []);
+
+  let host = null, offset = 0, bars = [], S = [], ATR = [], price = NaN, priceT = 0;
+  let armed = false, actx = null, wake = null, alarmTimer = null, fetching = false, ready = false;
+
+  const now = () => Date.now() + offset;
+  const fmtP = (x) => (Number.isFinite(x) ? x.toLocaleString("en-US", { minimumFractionDigits: 1, maximumFractionDigits: 1 }) : "—");
+  const fmtT = (ms) => new Date(ms).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false });
+  const fmtDT = (ms) => { const d = new Date(ms); return (d.getMonth() + 1) + "/" + d.getDate() + " " + fmtT(ms); };
+  const sideName = (s) => (s === 1 ? "做多" : "做空");
+
+  // ---------- 行情 ----------
+  async function getJSON(path) {
+    const order = host ? [host].concat(HOSTS.filter((h) => h !== host)) : HOSTS;
+    let err = null;
+    for (const h of order) {
+      try {
+        const ctl = new AbortController(); const to = setTimeout(() => ctl.abort(), 10000);
+        const r = await fetch(h + path, { cache: "no-store", signal: ctl.signal });
+        clearTimeout(to);
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        const j = await r.json();
+        host = h; setConn(true); return j;
+      } catch (e) { err = e; }
+    }
+    setConn(false); throw err;
+  }
+  function setConn(ok) {
+    const c = $("conn");
+    c.className = "conn " + (ok ? "ok" : "bad");
+    $("connText").textContent = ok ? "已连接 " + host.replace("https://", "") : "连不上 Binance 行情（大陆地区请开 VPN），稍后自动重试";
+  }
+  const toBar = (k) => ({ t: k[0], o: +k[1], h: +k[2], l: +k[3], c: +k[4], v: +k[5], ct: k[6], tb: +k[9] });
+
+  function merge(list) {
+    const m = new Map(bars.map((b) => [b.t, b]));
+    const n = now();
+    for (const b of list) if (b.ct < n) m.set(b.t, b);
+    bars = Array.from(m.values()).sort((a, b) => a.t - b.t).slice(-NBARS);
+  }
+  function contiguous() {
+    for (let i = 1; i < bars.length; i++) if (bars[i].t - bars[i - 1].t !== BAR) return false;
+    return true;
+  }
+  async function loadHistory() {
+    try { const t = await getJSON("/api/v3/time"); offset = t.serverTime - Date.now(); } catch (e) { offset = 0; }
+    bars = [];
+    let end = now(), got = [];
+    for (let i = 0; i < 7; i++) {
+      const k = await getJSON("/api/v3/klines?symbol=BTCUSDT&interval=15m&limit=1000&endTime=" + end);
+      if (!k.length) break;
+      got = k.map(toBar).concat(got);
+      end = k[0][0] - 1;
+      $("updated").textContent = "加载历史 " + got.length + " / 7000 根";
+    }
+    merge(got);
+    const live = got[got.length - 1];
+    if (live && live.ct >= now()) { price = live.c; priceT = now(); }
+    recompute();
+    ready = true;
+    if (lastClose() > state.lastEval && now() - lastClose() <= ACT) onNewBar();
+    else { state.lastEval = Math.max(state.lastEval, lastClose()); store.set("state", state); }
+    if (state.trade) checkBarAgainstStop();
+  }
+  const lastClose = () => (bars.length ? bars[bars.length - 1].t + BAR : 0);
+  function recompute() { const r = E.compute(bars); S = r.S; ATR = r.atr; }
+
+  async function refresh() {
+    if (fetching || !ready) return;
+    fetching = true;
+    try {
+      const k = await getJSON("/api/v3/klines?symbol=BTCUSDT&interval=15m&limit=6");
+      const before = lastClose();
+      merge(k.map(toBar));
+      const live = k[k.length - 1];
+      if (+live[6] >= now()) { price = +live[4]; priceT = now(); }
+      if (!contiguous()) { ready = false; fetching = false; await loadHistory(); return; }
+      if (lastClose() !== before) { recompute(); onNewBar(); }
+      checkTrade();
+    } catch (e) { /* 下次重试 */ } finally { fetching = false; render(); }
+  }
+  async function pollPrice() {
+    if (!ready) return;
+    try { const j = await getJSON("/api/v3/ticker/price?symbol=BTCUSDT"); price = +j.price; priceT = now(); checkTrade(); renderLive(); } catch (e) { /* 忽略 */ }
+  }
+
+  // ---------- 规则 ----------
+  function onNewBar() {
+    const i = bars.length - 1, b = bars[i], close = b.t + BAR;
+    if (state.trade) { checkBarAgainstStop(); return; }
+    if (close <= state.lastEval) return;
+    state.lastEval = close; store.set("state", state);
+    const s = S[i];
+    if (!(Math.abs(s) >= THR)) return;
+    const side = s >= THR ? 1 : -1, a = ATR[i], late = now() - close, md = mode();
+    const t = { side, sigT: close, s, entry: b.c, atr: a, exitT: close + md.hold, fill: null, warned: false,
+      stopM: md.stop, tpM: md.tp, tpOn: tpOn(), mode: settings.mode };
+    if (late > ACT) {
+      addLog(t, NaN, "错过（晚 " + Math.round(late / 60000) + " 分钟）", NaN);
+      return;
+    }
+    state.trade = t; store.set("state", state);
+    const lv = levels(t);
+    fire(side === 1 ? "up" : "down", sideName(side) + " BTC",
+      "参考进场价 " + fmtP(t.entry) + "，请在 1 分钟内进场\n止损 " + fmtP(lv.stop) + (t.tpOn ? "\n止盈 " + fmtP(lv.tp) : "") +
+      "\n最晚 " + fmtT(t.exitT) + " 平仓\n" + sizeText(lv.ent, a, true, t.stopM),
+      sideName(side) + "信号。止损 " + Math.round(lv.stop) + (t.tpOn ? "，止盈 " + Math.round(lv.tp) : "") + "。", true);
+  }
+  function levels(t) {
+    const ent = t.fill || t.entry, sm = t.stopM || 2, tm = t.tpM || 3;
+    return { ent, stop: ent - t.side * sm * t.atr, tp: ent + t.side * tm * t.atr, dist: sm * t.atr };
+  }
+  function checkBarAgainstStop(b) {
+    const t = state.trade; if (!t) return;
+    const lv = levels(t);
+    for (const k of bars) {
+      if (k.t < t.sigT || k.t >= t.exitT) continue;
+      if ((t.side === 1 && k.l <= lv.stop) || (t.side === -1 && k.h >= lv.stop)) { closeTrade("止损", lv.stop); return; }
+      if (t.tpOn && ((t.side === 1 && k.h >= lv.tp) || (t.side === -1 && k.l <= lv.tp))) { closeTrade("止盈", lv.tp); return; }
+    }
+  }
+  function checkTrade() {
+    const t = state.trade; if (!t) return;
+    const n = now(), lv = levels(t);
+    if (n >= t.exitT) { closeTrade("到点平仓", price); return; }
+    if (!t.warned && n >= t.exitT - 60000) {
+      t.warned = true; store.set("state", state);
+      fire("warn", "1 分钟后平仓", fmtT(t.exitT) + " 到点，请准备平掉" + sideName(t.side) + "单", "还有一分钟，准备平仓。", false);
+    }
+    if (!Number.isFinite(price) || n - priceT > 30000) return;
+    if (t.side * (price - lv.stop) <= 0) closeTrade("止损", price);
+    else if (t.tpOn && t.side * (price - lv.tp) >= 0) closeTrade("止盈", price);
+  }
+  function closeTrade(reason, px) {
+    const t = state.trade; if (!t) return;
+    const lv = levels(t);
+    const net = Number.isFinite(px) ? t.side * (px / lv.ent - 1) * 1e4 - 2 * settings.fee : NaN;
+    addLog(t, px, reason, net);
+    state.trade = null; store.set("state", state);
+    const kind = reason === "止损" ? "warn" : t.side === 1 ? "up" : "down";
+    fire(kind, reason + "：平掉" + sideName(t.side) + "单",
+      "现价约 " + fmtP(px) + "\n这笔按现价估算 " + (Number.isFinite(net) ? (net >= 0 ? "+" : "") + net.toFixed(1) + "bp（已扣手续费）" : "—"),
+      reason + "，请平掉" + sideName(t.side) + "单。", reason === "止损");
+    render();
+  }
+  function addLog(t, px, reason, net) {
+    log.unshift({ sigT: t.sigT, side: t.side, entry: t.fill || t.entry, exit: px, reason, net });
+    log = log.slice(0, 60); store.set("log", log);
+  }
+
+  // ---------- 仓位 ----------
+  function sizeCalc(ent, atr, sm) {
+    const dist = sm * atr, eq = +settings.equity || 0;
+    let qty = eq * (settings.risk / 100) / dist, capped = false;
+    const maxQty = (settings.lev * eq) / ent;
+    if (qty > maxQty) { qty = maxQty; capped = true; }
+    const notional = qty * ent;
+    return { qty, notional, lev: eq ? notional / eq : 0, loss: qty * dist, fee: notional * settings.fee * 2 / 1e4, capped, eq };
+  }
+  function sizeText(ent, atr, short, sm) {
+    if (!Number.isFinite(atr) || !(settings.equity > 0)) return "填写本金后显示建议仓位";
+    const z = sizeCalc(ent, atr, sm || mode().stop);
+    const s1 = "建议仓位 " + z.qty.toFixed(4) + " BTC（名义 " + Math.round(z.notional).toLocaleString() + " USDT，约 " + z.lev.toFixed(2) + " 倍杠杆）";
+    if (short) return s1;
+    return s1 + "。打到止损约亏 " + z.loss.toFixed(2) + " USDT（本金的 " + (z.loss / z.eq * 100).toFixed(2) + "%），另有来回手续费约 " + z.fee.toFixed(2) + " USDT" +
+      (z.capped ? "。已按最大杠杆封顶，实际风险低于设定" : "") + "。";
+  }
+
+  // ---------- 提醒 ----------
+  function beep(kind) {
+    if (!actx) return;
+    const pattern = kind === "warn" ? [[440, 0, .45], [440, .6, .45]] : [[880, 0, .14], [880, .22, .14], [1175, .44, .22]];
+    const t0 = actx.currentTime + .02;
+    for (const [f, at, d] of pattern) {
+      const o = actx.createOscillator(), g = actx.createGain();
+      o.type = "sine"; o.frequency.value = f;
+      g.gain.setValueAtTime(0, t0 + at); g.gain.linearRampToValueAtTime(.35, t0 + at + .02); g.gain.linearRampToValueAtTime(0, t0 + at + d);
+      o.connect(g); g.connect(actx.destination); o.start(t0 + at); o.stop(t0 + at + d + .05);
+    }
+  }
+  function speak(text) {
+    if (!settings.voice || !("speechSynthesis" in window)) return;
+    try { const u = new SpeechSynthesisUtterance(text); u.lang = "zh-CN"; u.rate = 1.05; speechSynthesis.cancel(); speechSynthesis.speak(u); } catch (e) { /* 不支持 */ }
+  }
+  function fire(kind, title, body, speech, repeat) {
+    const a = $("alert");
+    a.className = "alert " + kind; $("alertT").textContent = title; $("alertB").textContent = body; a.hidden = false;
+    document.title = "【" + title + "】BTC 回归信号台";
+    if (armed) {
+      if (actx && actx.state === "suspended") actx.resume().catch(() => {});
+      beep(kind); speak(speech || title);
+      clearInterval(alarmTimer);
+      if (repeat) { let k = 0; alarmTimer = setInterval(() => { if (++k > 12 || a.hidden) { clearInterval(alarmTimer); return; } beep(kind); }, 5000); }
+    }
+    try { if ("Notification" in window && Notification.permission === "granted") new Notification(title, { body }); } catch (e) { /* 忽略 */ }
+    if (settings.bark) {
+      const url = "https://api.day.app/" + encodeURIComponent(settings.bark.trim()) + "/" + encodeURIComponent(title) + "/" +
+        encodeURIComponent(body) + "?group=BTC&level=timeSensitive";
+      fetch(url, { mode: "no-cors" }).catch(() => {});
+    }
+  }
+  function dismiss() { $("alert").hidden = true; clearInterval(alarmTimer); document.title = "BTC 回归信号台"; }
+  function arm() {
+    try {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (AC) { actx = actx || new AC(); actx.resume().catch(() => {}); }
+    } catch (e) { actx = null; }
+    armed = true; beep("up"); speak("提醒已开启");
+    const waits = [keepAwake()];
+    try { if ("Notification" in window && Notification.permission === "default") waits.push(Notification.requestPermission()); } catch (e) { /* 忽略 */ }
+    Promise.allSettled(waits).then(() => {
+      const b = $("armBtn"); b.textContent = wake ? "提醒已开启 · 屏幕常亮" : "提醒已开启"; b.classList.add("on");
+    });
+  }
+  async function keepAwake() {
+    try { if ("wakeLock" in navigator) { wake = await navigator.wakeLock.request("screen"); wake.addEventListener("release", () => { wake = null; }); } } catch (e) { wake = null; }
+  }
+
+  // ---------- 渲染 ----------
+  function render() {
+    renderLive();
+    const i = bars.length - 1;
+    const s = i >= 0 ? S[i] : NaN;
+    const big = $("sNow");
+    big.textContent = Number.isFinite(s) ? (s >= 0 ? "+" : "−") + Math.abs(s).toFixed(2) : "—";
+    big.className = "big" + (s >= THR ? " up" : s <= -THR ? " down" : "");
+    const pos = Number.isFinite(s) ? Math.max(0, Math.min(100, (s + 5) * 10)) : 50;
+    $("needle").style.left = pos + "%";
+    $("atrNow").textContent = i >= 0 && Number.isFinite(ATR[i]) ? fmtP(ATR[i]) : "—";
+    if (i >= 0) $("updated").textContent = "最近收盘 " + fmtT(lastClose());
+    const pill = $("statePill"), t = state.trade;
+    if (t) { pill.textContent = "持仓中 · " + sideName(t.side); pill.className = "pill " + (t.side === 1 ? "up" : "down"); }
+    else if (s >= THR) { pill.textContent = "做多区"; pill.className = "pill up"; }
+    else if (s <= -THR) { pill.textContent = "做空区"; pill.className = "pill down"; }
+    else { pill.textContent = "等待信号"; pill.className = "pill"; }
+    const md = mode();
+    $("tpWrap").hidden = settings.mode !== "time";
+    $("readHint").textContent = "每根 15 分钟 K 线收盘时判断一次。信号出现后 1 分钟内进场；当前出场方式：" +
+      (settings.mode === "time" ? "止损 2×ATR，持有 1 小时到点平仓" + (settings.tp ? "，止盈 3×ATR" : "") : "止损 1×ATR，止盈 2×ATR（1:2），最多持有 2 小时") + "。";
+    renderTrade(); renderEdge(); renderLog(); renderPreview(); drawChart();
+  }
+  function renderLive() {
+    $("price").textContent = fmtP(price);
+    const t = state.trade;
+    if (t) {
+      const lv = levels(t);
+      const pnl = Number.isFinite(price) ? t.side * (price / lv.ent - 1) * 1e4 : NaN;
+      const el = $("tPnl");
+      el.textContent = Number.isFinite(pnl) ? (pnl >= 0 ? "+" : "") + pnl.toFixed(1) + "bp（" + (pnl / 100).toFixed(2) + "%，未扣费）" : "—";
+      el.className = "v " + (pnl >= 0 ? "pos" : "neg");
+      const left = t.exitT - now();
+      $("tPill").textContent = now() - t.sigT < 60000 ? "请在 1 分钟内进场" : left > 0 ? "持有中，还剩 " + Math.ceil(left / 60000) + " 分钟" : "到点平仓";
+    }
+  }
+  function renderTrade() {
+    const t = state.trade, card = $("tradeCard");
+    card.hidden = !t;
+    if (!t) return;
+    const lv = levels(t);
+    card.className = "panel trade " + (t.side === 1 ? "up" : "down");
+    $("tSide").textContent = sideName(t.side) + " BTC";
+    $("tEntry").innerHTML = fmtP(lv.ent) + "<small>" + (t.fill ? "按你的成交价" : "信号 K 线收盘价 " + fmtT(t.sigT)) + "</small>";
+    $("tStopL").textContent = "止损（" + (t.stopM || 2) + "×ATR）";
+    $("tTpL").textContent = "止盈（" + (t.tpM || 3) + "×ATR" + (t.mode === "rr" ? "，1:2" : "") + "）";
+    $("tStop").innerHTML = fmtP(lv.stop) + "<small>距离 " + fmtP(lv.dist) + "</small>";
+    $("tTpRow").hidden = !t.tpOn;
+    $("tTp").innerHTML = fmtP(lv.tp) + "<small>距离 " + fmtP(Math.abs(lv.tp - lv.ent)) + "</small>";
+    $("tExit").innerHTML = fmtT(t.exitT) + "<small>止盈止损都没碰到就到点市价平</small>";
+    $("tSize").textContent = sizeText(lv.ent, t.atr, false, t.stopM || 2);
+    if (document.activeElement !== $("fillPx")) $("fillPx").value = t.fill ? String(t.fill) : "";
+  }
+  function renderEdge() {
+    const md = mode(), g = settings.mode === "time" && settings.tp ? md.grossTp : md.gross, f = +settings.fee || 0;
+    const nets = g.map((x) => x - 2 * f);
+    $("modeName").textContent = md.name;
+    const i = bars.length - 1;
+    if (i >= 0 && Number.isFinite(ATR[i]) && settings.mode !== "time") {
+      const stopBp = md.stop * ATR[i] / bars[i].c * 1e4, fr = 2 * f / stopBp, be = (1 + fr) / 3;
+      $("beLine").innerHTML = "按现在的波动，止损约 <b>" + stopBp.toFixed(0) + "bp</b>，来回手续费占止损的 " + (fr * 100).toFixed(0) +
+        "%，<b>打平需要胜率 " + (be * 100).toFixed(0) + "%</b>（回测胜率 " + Math.round(md.win[0] * 100) + "–" + Math.round(md.win[1] * 100) + "%）";
+    } else $("beLine").textContent = "";
+    const avg = (nets[0] + nets[1]) / 2, b = $("netBp");
+    b.textContent = (avg >= 0 ? "+" : "") + avg.toFixed(1) + "bp";
+    b.className = avg >= 0 ? "pos" : "neg";
+    const names = ["前 2 年（选参数）", "最近 1 年（检验）"];
+    $("edgeRows").innerHTML = g.map((x, k) =>
+      "<tr><td>" + names[k] + "</td><td class=\"n\">" + Math.round(md.win[k] * 100) + "%</td><td class=\"n\">" + x.toFixed(2) + "bp</td><td class=\"n " + (nets[k] >= 0 ? "pos" : "neg") + "\">" +
+      (nets[k] >= 0 ? "+" : "") + nets[k].toFixed(2) + "bp</td></tr>").join("");
+  }
+  function renderLog() {
+    $("logEmpty").hidden = log.length > 0;
+    $("logRows").innerHTML = log.map((r) =>
+      "<tr><td>" + fmtDT(r.sigT) + "</td><td style=\"color:var(--" + (r.side === 1 ? "up" : "down") + ")\">" + sideName(r.side) + "</td><td class=\"n\">" +
+      fmtP(r.entry) + "</td><td class=\"n\">" + fmtP(r.exit) + "</td><td>" + r.reason + "</td><td class=\"n " + (Number.isFinite(r.net) ? (r.net >= 0 ? "pos" : "neg") : "") + "\">" +
+      (Number.isFinite(r.net) ? (r.net >= 0 ? "+" : "") + r.net.toFixed(1) : "—") + "</td></tr>").join("");
+  }
+  function renderPreview() {
+    const i = bars.length - 1;
+    $("sizePreview").textContent = i >= 0 && Number.isFinite(ATR[i]) ? "按现在的波动（ATR " + fmtP(ATR[i]) + "）：" + sizeText(bars[i].c, ATR[i], false) : "";
+  }
+
+  function drawChart() {
+    const svg = $("chart"), box = $("chartBox");
+    const W = Math.max(280, box.clientWidth), H = 200, pl = 40, pr = 12, pt = 10, pb = 24;
+    const n = Math.min(96, bars.length), i0 = bars.length - n;
+    const pts = [];
+    for (let i = i0; i < bars.length; i++) if (Number.isFinite(S[i])) pts.push({ i, t: bars[i].t + BAR, s: S[i] });
+    svg.setAttribute("viewBox", "0 0 " + W + " " + H);
+    if (pts.length < 2) { svg.innerHTML = ""; return; }
+    let m = 5; for (const p of pts) m = Math.max(m, Math.ceil(Math.abs(p.s)));
+    const t0 = pts[0].t, t1 = pts[pts.length - 1].t;
+    const x = (t) => pl + (t - t0) / Math.max(1, t1 - t0) * (W - pl - pr);
+    const y = (v) => pt + (m - v) / (2 * m) * (H - pt - pb);
+    let h = "";
+    h += "<rect x=\"" + pl + "\" y=\"" + y(m) + "\" width=\"" + (W - pl - pr) + "\" height=\"" + (y(THR) - y(m)) + "\" fill=\"var(--up-soft)\"/>";
+    h += "<rect x=\"" + pl + "\" y=\"" + y(-THR) + "\" width=\"" + (W - pl - pr) + "\" height=\"" + (y(-m) - y(-THR)) + "\" fill=\"var(--down-soft)\"/>";
+    for (const v of [-THR, 0, THR]) {
+      h += "<line x1=\"" + pl + "\" x2=\"" + (W - pr) + "\" y1=\"" + y(v) + "\" y2=\"" + y(v) + "\" stroke=\"var(--line)\" stroke-width=\"1\"" + (v ? " stroke-dasharray=\"4 4\"" : "") + "/>";
+      h += "<text x=\"" + (pl - 6) + "\" y=\"" + (y(v) + 4) + "\" text-anchor=\"end\">" + (v > 0 ? "+" + v : v < 0 ? "−" + Math.abs(v) : "0") + "</text>";
+    }
+    for (let k = Math.ceil(t0 / 3600e3) * 3600e3; k <= t1; k += 3600e3) {
+      const d = new Date(k); if (d.getMinutes() !== 0 || d.getHours() % 6 !== 0) continue;
+      h += "<text x=\"" + x(k) + "\" y=\"" + (H - 6) + "\" text-anchor=\"middle\">" + fmtT(k) + "</text>";
+    }
+    h += "<path d=\"" + pts.map((p, k) => (k ? "L" : "M") + x(p.t).toFixed(1) + " " + y(p.s).toFixed(1)).join("") + "\" fill=\"none\" stroke=\"var(--fg)\" stroke-width=\"2\" stroke-linejoin=\"round\"/>";
+    for (const p of pts) if (Math.abs(p.s) >= THR)
+      h += "<circle cx=\"" + x(p.t) + "\" cy=\"" + y(p.s) + "\" r=\"4.5\" fill=\"var(--" + (p.s > 0 ? "up" : "down") + ")\" stroke=\"var(--panel)\" stroke-width=\"2\"/>";
+    const e = pts[pts.length - 1];
+    h += "<circle cx=\"" + x(e.t) + "\" cy=\"" + y(e.s) + "\" r=\"5\" fill=\"var(--fg)\" stroke=\"var(--panel)\" stroke-width=\"2\"/>";
+    h += "<line id=\"xh\" y1=\"" + pt + "\" y2=\"" + (H - pb) + "\" stroke=\"var(--muted)\" stroke-width=\"1\" visibility=\"hidden\"/>";
+    svg.innerHTML = h;
+    svg.onpointermove = (ev) => {
+      const r = svg.getBoundingClientRect(), px = (ev.clientX - r.left) * W / r.width;
+      let best = pts[0]; for (const p of pts) if (Math.abs(x(p.t) - px) < Math.abs(x(best.t) - px)) best = p;
+      const xh = $("xh"); xh.setAttribute("x1", x(best.t)); xh.setAttribute("x2", x(best.t)); xh.setAttribute("visibility", "visible");
+      const tip = $("tip"); tip.hidden = false;
+      tip.style.left = Math.max(70, Math.min(r.width - 70, x(best.t) * r.width / W)) + "px"; tip.style.top = (y(best.s) * r.height / H) + "px";
+      tip.textContent = fmtT(best.t) + " 收盘 · S " + (best.s >= 0 ? "+" : "−") + Math.abs(best.s).toFixed(2);
+    };
+    svg.onpointerleave = () => { $("tip").hidden = true; const xh = $("xh"); if (xh) xh.setAttribute("visibility", "hidden"); };
+  }
+
+  // ---------- 设置 ----------
+  const fields = ["equity", "risk", "lev", "fee"];
+  function loadForm() {
+    for (const f of fields) $(f).value = settings[f];
+    $("tp").checked = !!settings.tp; $("voice").checked = !!settings.voice; $("bark").value = settings.bark || "";
+    $(settings.mode === "time" ? "modeTime" : "modeRr").checked = true;
+  }
+  $("form").addEventListener("input", () => {
+    for (const f of fields) { const v = parseFloat($(f).value); if (Number.isFinite(v) && v >= 0) settings[f] = v; }
+    settings.tp = $("tp").checked; settings.voice = $("voice").checked; settings.bark = $("bark").value.trim();
+    settings.mode = $("modeTime").checked ? "time" : "rr";
+    store.set("settings", settings); render();
+  });
+  $("form").addEventListener("submit", (e) => e.preventDefault());
+  $("fillPx").addEventListener("change", () => {
+    const t = state.trade; if (!t) return;
+    const v = parseFloat($("fillPx").value.replace(/,/g, ""));
+    t.fill = Number.isFinite(v) && v > 0 ? v : null; store.set("state", state); render();
+  });
+  $("closeBtn").addEventListener("click", () => { if (state.trade) closeTrade("手动平仓", price); });
+  $("armBtn").addEventListener("click", arm);
+  $("alertOk").addEventListener("click", dismiss);
+  $("testBtn").addEventListener("click", () => {
+    const i = bars.length - 1, px = Number.isFinite(price) ? price : i >= 0 ? bars[i].c : NaN, a = i >= 0 ? ATR[i] : NaN, md = mode();
+    fire("up", "测试：做多 BTC", "这是测试，不是真信号\n参考进场价 " + fmtP(px) + "\n止损 " + fmtP(px - md.stop * a) +
+      (tpOn() ? "\n止盈 " + fmtP(px + md.tp * a) : "") + "\n" + sizeText(px, a, true), "测试提醒，不是真信号。", false);
+  });
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") { if (armed && !wake) keepAwake(); refresh(); }
+  });
+  window.addEventListener("resize", drawChart);
+
+  // ---------- 时钟 ----------
+  setInterval(() => {
+    const n = now(), next = Math.ceil(n / BAR) * BAR, left = Math.max(0, next - n);
+    $("countdown").textContent = String(Math.floor(left / 60000)).padStart(2, "0") + ":" + String(Math.floor(left / 1000) % 60).padStart(2, "0");
+    if (ready && !fetching && n - (Math.floor(n / BAR) * BAR) > 1500 && lastClose() < Math.floor(n / BAR) * BAR) refresh();
+    if (state.trade) { checkTrade(); renderLive(); }
+  }, 1000);
+  setInterval(() => { if (ready) pollPrice(); }, 5000);
+
+  loadForm();
+  render();
+  (async function boot() {
+    while (!ready) {
+      try { await loadHistory(); } catch (e) { $("updated").textContent = "等待行情…"; await new Promise((r) => setTimeout(r, 15000)); }
+    }
+    render();
+  })();
+  window.__btcrev = { get bars() { return bars; }, get S() { return S; }, get state() { return state; }, fire };
+})();
+</script>
+</body>
+</html>
